@@ -1,0 +1,44 @@
+name: Portfolio deployment verification
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  manifests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Verify rendered deployment
+        run: |
+          kubectl kustomize deploy/portfolio > "$RUNNER_TEMP/ledger.yaml"
+          ruby scripts/check-portfolio.rb "$RUNNER_TEMP/ledger.yaml"
+      - name: Verify signing key generation
+        run: |
+          bash scripts/generate-jwt-secret.sh > "$RUNNER_TEMP/signing.yaml"
+          ruby -ryaml -e 'abort unless YAML.load_file(ARGV.fetch(0)).fetch("data").keys.sort == %w[jwtRS256.key jwtRS256.key.pub]' "$RUNNER_TEMP/signing.yaml"
+      - name: Scan repository for secrets
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          version: v0.69.3
+          scan-type: fs
+          scan-ref: .
+          scanners: secret
+          hide-progress: true
+          exit-code: "1"
+
+      - name: Block high and critical dependency findings
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          skip-setup-trivy: true
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          hide-progress: true
+          exit-code: "1"
